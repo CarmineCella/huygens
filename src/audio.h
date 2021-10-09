@@ -1,8 +1,6 @@
 // audio.h
 
-#include <portaudio.h>
-#include <iostream>
-
+#include "includes.h"
 const int bsize = 64;
 
 int callback(const void*, void*, unsigned long, const PaStreamCallbackTimeInfo*, PaStreamCallbackFlags, void*);
@@ -11,9 +9,10 @@ class Audio
 {
 public:
 	PaStream* stream;
-	int (*process)(float*, float*);
+	PaStreamParameters inParams, outParams;
+	int (*process)(const float*, float*);
 
-	Audio(int (*processor)(float* in, float* out))
+	Audio(int (*processor)(const float* in, float* out))
 	{
 		process = processor;
 	}
@@ -28,10 +27,43 @@ public:
 		return err;
 	}
 
-	void startup()
+	void startup(int in = 1, int out = 2)
 	{
 		clean(Pa_Initialize());
-		clean(Pa_OpenDefaultStream(&stream, 0, 2, paFloat32, SR, bsize, callback, this));
+
+		const PaDeviceInfo* deviceInfo;
+
+		inParams.device = Pa_GetDefaultInputDevice();
+		if (inParams.device == paNoDevice)
+		{
+			std::cout << "Error: No default input device.\n";
+			shutdown();
+		}
+		deviceInfo = Pa_GetDeviceInfo(inParams.device);
+		inParams.channelCount = in;
+		inParams.sampleFormat = paFloat32;
+		inParams.suggestedLatency = deviceInfo->defaultLowInputLatency;
+		inParams.hostApiSpecificStreamInfo = NULL;
+
+		std::cout << "Input from " << deviceInfo->name << "\n";
+		std::cout << "  " << deviceInfo->maxInputChannels << " channels available.\n";
+
+		outParams.device = Pa_GetDefaultOutputDevice();
+		if (outParams.device == paNoDevice)
+		{
+			std::cout << "Error: No default output device.\n";
+			shutdown();
+		}
+		deviceInfo = Pa_GetDeviceInfo(outParams.device);
+		outParams.channelCount = out;
+		outParams.sampleFormat = paFloat32;
+		outParams.suggestedLatency = deviceInfo->defaultLowOutputLatency;
+		outParams.hostApiSpecificStreamInfo = NULL;
+
+		std::cout << "Output to " << deviceInfo->name << "\n";
+		std::cout << "  " << deviceInfo->maxOutputChannels << " channels available.\n";
+
+		clean(Pa_OpenStream(&stream, &inParams, &outParams, SR, bsize, 0, callback, this));
 		clean(Pa_StartStream(stream));
 	}
 
@@ -50,6 +82,6 @@ int callback(const void* inputBuffer, void* outputBuffer,
 			  void* userData)
 {
 	Audio* A = (Audio*)userData;
-	A->process((float*) inputBuffer, (float*) outputBuffer);
+	A->process((const float*) inputBuffer, (float*) outputBuffer);
 	return 0;
 }
