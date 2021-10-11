@@ -44,6 +44,16 @@ double ftom(double frequency)
 	return 69 + log2(frequency / 440) * 12;
 }
 
+double atodb(double amplitude)
+{
+	return 20 * log(amplitude);
+}
+
+double dbtoa(double db)
+{
+	return pow(10, db / 20);
+}
+
 #endif
 
 #define INCLUDED

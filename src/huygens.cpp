@@ -6,6 +6,7 @@
 
 #include "audio.h"
 #include "midi.h"
+#include "launchpad.h"
 
 using namespace std;
 
@@ -21,13 +22,7 @@ int process(const float* in, float* out)
 {
 	for (int i = 0; i < bsize; i++)
 	{
-		// fmtest(out, i);	
-		// mirrortest(in, out, i);
-		// gravitytest(in, out, i);
-		// resontest(in, out, i);
-		// particletest(in, out, i);
-		// bouncertest(in, out, i);
-		gravtest(in, out, i);
+		polytest(in, out, i);
 	}
 
 	return 0;
@@ -36,65 +31,57 @@ int process(const float* in, float* out)
 static Audio A = Audio(process);
 static MidiIn MI = MidiIn();
 static MidiOut MO = MidiOut();
+static Launchpad L = Launchpad();
 
 int main()
 {
-	// particletest2();
-	// staticbounctest();
-	// return 0;
-
 	// bind keyboard interrupt to program exit
 	signal(SIGINT, interrupt);
 
-	gravinit();
-	// bunc.reset(100);
-
-
 	A.startup(); // startup audio engine
-
-	// Pa_Sleep(500);
-
-	// bunc.reset(200);
-
-	// Pa_Sleep(500);
-
-	// bunc.reset(300);
-
-	while (true)
-	{
-		Pa_Sleep(1000);
-		poly.print();
-	}
-
 	MI.startup(); // startup midi engine
+	MI.ignore();
 	MO.startup();
 	MI.getports();
 	MO.getports();
 
-	MI.open("Launchpad Pro MK3 LPProMK3 MIDI");
-	MO.open("Launchpad Pro MK3 LPProMK3 MIDI");
+	MI.open("IAC Driver Bus 1");
 
 	vector<unsigned char> message;
-	int nBytes, i;
+	int nBytes;
 	double stamp;
+
+	int pitches[poly.voices];
+	for (int i = 0; i < poly.voices; i++)
+		pitches[i] = 0;
 
 	while (running)
 	{
 		stamp = MI.get(&message);
 		nBytes = message.size();
-		for (i = 0; i < nBytes; i++)
-			cout << "Byte " << i << " = " << (int)message[i] << ", ";
-		if (nBytes > 0)
-			cout << "stamp = " << stamp << endl;
 
-		Pa_Sleep(1);
+
+		if (nBytes && (int)message[0] == 144)
+		{
+			// int pitch = 36 + L.note(message[1]);
+			int pitch = (int)message[1];
+			if ((int)message[2])
+				pitches[poly.request(mtof(pitch), dbtoa(-8 * (1 - (double)message[2] / 127)))] = pitch;
+			else
+			{
+				for (int j = 0; j < poly.voices; j++)
+					if (pitches[j] == pitch)
+						poly.release(j);
+			}
+		}
+
+		Pa_Sleep(10);
 	}
 
 	MI.shutdown(); // shutdown midi engine
 	MO.shutdown();
 
 	A.shutdown(); // shutdown audio engine
+
 	return 0;
-
-
 }

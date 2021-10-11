@@ -1,5 +1,7 @@
 // midi.h
 
+#ifndef MIDI
+
 class MidiIn
 {
 private:
@@ -157,3 +159,6 @@ public:
 		return 1;
 	}
 };
+
+#endif
+#define MIDI

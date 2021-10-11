@@ -175,26 +175,21 @@ int resontest(const float* in, float* out, int i)
 
 //////////////////////////////////////////////////////////
 
-Polyphon<double> poly = Polyphon<double>(&sm.cycle, 2, 1, 0.7);
+// Polyphon<double> poly = Polyphon<double>(&sm.cycle, 16, 13, 0.5);
+// Polyphon<double> poly = Polyphon<double>(&sm.saw, 16, 9, 0.4);
+// Polyphon<double> poly = Polyphon<double>(&sm.cycle, 16, 11, 0.7);
+Polyphon<double> poly = Polyphon<double>(&sm.saw, 10, 17, 0.7);
+// Polyphon<double> poly = Polyphon<double>(&sm.cycle, 7, 11, 0.7);
 
-int gravinit()
+int polytest(const float* in, float* out, int i)
 {
-	poly.request(mtof(68));
-	poly.request(mtof(68.5));
-
-	poly.print();
-	// poly.bouncers[0].reset(100);
-	// poly.bouncers[1].reset(200);
-	return 0;
-}
-
-int gravtest(const float* in, float* out, int i)
-{
-	float sample = (float)poly();
+	float sample = (float)(poly());
 	out[2 * i] = sample;
 	out[2 * i + 1] = sample;
 
-	poly.prepare();
+	if (i %  8 == 0)
+		poly.physics();
+
 	poly.tick();
 	return 0;
 }
