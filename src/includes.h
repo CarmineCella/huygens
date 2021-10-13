@@ -10,6 +10,8 @@
 
 #include <vector>
 #include <cmath>
+#include <complex>
+#include <algorithm>
 
 #include <portaudio.h>
 #include "RtMidi.h"

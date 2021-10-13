@@ -96,90 +96,15 @@ int resontest(const float* in, float* out, int i)
 
 //////////////////////////////////////////////////////////
 
-// Particle m1 = Particle(1, 500, 0, 0, 10);
-// Particle m2 = Particle(1, 300, 0, 0, 10);
-// Spring s1 = Spring(&m1, &m2, 10, 400);
-// Synth<double> mass1 = Synth<double>(&sm.cycle, 500);
-// Synth<double> mass2 = Synth<double>(&sm.cycle, 300);
-// void particletest(const float* in, float* out, int i)
-// {
-// 	float sample = (float)(mass1() + mass2());
-// 	out[2 * i] = sample;
-// 	out[2 * i + 1] = sample;
-
-// 	mass1.freqmod(m1.position);
-// 	mass2.freqmod(m2.position);
-	
-// 	mass1.tick();
-// 	mass2.tick();
-
-// 	m1.tick();
-// 	m2.tick();
-
-// 	m1.prepare();
-// 	m2.prepare();
-// 	s1.tick();
-// }
-
-//////////////////////////////////////////////////////////
-
-// Bouncer<double> bunc = Bouncer<double>(&sm.cycle, 100, 12, 0.7);
-// Synth<double> bunclfo = Synth<double>(&sm.square, 0.1);
-// int bouncertest(const float* in, float* out, int i)
-// {
-// 	float sample = (float)bunc();
-// 	out[2 * i] = sample;
-// 	out[2 * i + 1] = sample;
-
-// 	// bunc.fundmod(100 + 50 * bunclfo());
-
-// 	bunc.tick();
-// 	// bunclfo.tick();
-
-// 	return 0;
-// }
-
-// void staticounctest()
-// {
-// 	bunc.fundmod(200);
-
-// 	for (int i = 0; i < 10; i++)
-// 	{
-// 		bunc.tick();
-// 		bunclfo.tick();
-// 	}
-
-// }
-
-// Particle m3 = Particle(1, 200, 0, 0, 10);
-// Spring s2 = Spring(&m2, &m3, 10, 100);
-// void particletest2()
-// {
-// 	for (int i = 0; i < 10000; i++)
-// 	{
-// 		if (i % 1000 == 0)
-// 			cout << m1.position << ", " << m2.position << ", " << m3.position << endl;
-
-// 		m1.tick();
-// 		m2.tick();
-// 		m3.tick();
-
-// 		m1.prepare();
-// 		m2.prepare();
-// 		m3.prepare();
-
-// 		s1.tick();
-// 		s2.tick();
-// 	}
-// }
-
-//////////////////////////////////////////////////////////
-
 // Polyphon<double> poly = Polyphon<double>(&sm.cycle, 16, 13, 0.5);
 // Polyphon<double> poly = Polyphon<double>(&sm.saw, 16, 9, 0.4);
 // Polyphon<double> poly = Polyphon<double>(&sm.cycle, 16, 11, 0.7);
-Polyphon<double> poly = Polyphon<double>(&sm.saw, 10, 17, 0.7);
+Polyphon<double> poly(&sm.cycle, 10, 11, 0.7);
 // Polyphon<double> poly = Polyphon<double>(&sm.cycle, 7, 11, 0.7);
+
+// Filter<double> lowpass({1,0}, {0,0.8});
+// Filter<complex<double>> F(1, {-1, 1i, -1i}, {0.7 + 0.7i, 0.7 - 0.7i});
+
 
 int polytest(const float* in, float* out, int i)
 {
@@ -191,5 +116,49 @@ int polytest(const float* in, float* out, int i)
 		poly.physics();
 
 	poly.tick();
+	return 0;
+}
+
+//////////////////////////////////////////////////////////
+
+Synth<double> oscA(&sm.cycle, 100, 0, 0);
+Synth<double> oscB(&sm.cycle, 200, 0, 0);
+Synth<double> oscC(&sm.cycle, 300, 0, 0);
+Synth<double> oscD(&sm.cycle, 400, 0, 0);
+Synth<double> oscE(&sm.cycle, 500, 0, 0);
+Synth<double> oscF(&sm.cycle, 600, 0, 0);
+Synth<double> oscG(&sm.cycle, 700, 0, 0);
+Synth<double> lfo(&sm.triangle, 0.05);
+double sensitivity = 0;
+
+int n = 7;
+Synth<double>* synths[] = { &oscA, &oscB, &oscC, &oscD, &oscE, &oscF, &oscG };
+
+int phasetest(const float* in, float* out, int i)
+{
+	float sample = 0;
+	for (int j = 0; j < n; j++)
+		sample += (float)((*synths[j])());
+	sample /= n;
+
+	out[2 * i] = sample;
+	out[2 * i + 1] = sample;
+
+	sensitivity = (1 + lfo()) / 120;
+	for (int j = 0; j < n; j++)
+		for (int k = j + 1; k < n; k++)
+		{
+			double distance = synths[j]->phase - synths[k]->phase;
+			synths[k]->phasemod(distance * sensitivity);
+			synths[j]->phasemod(-distance * sensitivity);
+		}
+	
+	for (int j = 0; j < n; j++)
+	{
+		synths[j]->tick();
+	}
+
+	lfo.tick();
+
 	return 0;
 }

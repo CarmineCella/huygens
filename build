@@ -1,0 +1,8 @@
+rm -rf stuff
+mkdir stuff
+cd stuff
+cmake ..
+make
+mv src/huygens ..
+cd ..
+rm -rf stuff

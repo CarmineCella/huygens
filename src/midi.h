@@ -2,6 +2,13 @@
 
 #ifndef MIDI
 
+enum Status
+{
+	note_on = 144, 
+	note_off = 128, 
+	aftertouch = 160
+};
+
 class MidiIn
 {
 private:

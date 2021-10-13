@@ -80,14 +80,6 @@ public:
 
 	Spring() { }
 
-	// Spring(Particle* first, Particle* second, double k, double equilibrium)
-	// {
-	// 	this->first = first;
-	// 	this->second = second;
-	// 	this->k = k;
-	// 	this->equilibrium = equilibrium;
-	// }
-
 	void tick()
 	{
 		double distance = second->position - first->position;
@@ -118,14 +110,6 @@ public:
 	}
 
 	Gravity() { }
-
-	// Gravity(Particle* first, Particle* second, double G, double epsilon =  0.0001)
-	// {
-	// 	this->first = first;
-	// 	this->second = second;
-	// 	this->G = G;
-	// 	this->epsilon = epsilon;
-	// }
 
 	void tick()
 	{
