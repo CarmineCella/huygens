@@ -7,6 +7,11 @@
 
 const int TABSIZE = 65536;
 
+enum Interp
+{
+	none = 0, linear = 1, quadratic = 2, cubic = 3
+};
+
 template <typename T> class Wave
 {
 public:
@@ -14,32 +19,60 @@ public:
 
 	Wave() { }
 
-	Wave(function<T(double)> shape)
+	Wave(function<T(double)> shape, Interp interp = Interp::cubic)
 	{
+		this->interp = interp;
 		for (int i = 0; i < TABSIZE; i++)
 		{
 			table[i] = shape((double)i / TABSIZE);
 		}
 	}
 
+	T none(int center)
+	{
+		return table[center];
+	}
+
+	T linear(int center, int after, double disp)
+	{
+		return table[center] * (1 - disp) + table[after] * disp;
+	}
+
+	T quadratic(int before, int center, int after, double disp)
+	{
+		return table[before] * ((disp - 0) * (disp - 1)) / ((-1 - 0) * (-1 - 1)) + 
+			   table[center] * ((disp + 1) * (disp - 1)) / (( 0 + 1) * ( 0 - 1)) + 
+			   table[after]  * ((disp + 1) * (disp + 0)) / (( 1 + 1) * ( 1 - 0));
+	}
+
+	T cubic(int before, int center, int after, int later, double disp)
+	{
+		return table[before] * ((disp - 0) * (disp - 1) * (disp - 2)) / ((-1 - 0) * (-1 - 1) * (-1 - 2)) + 
+			   table[center] * ((disp + 1) * (disp - 1) * (disp - 2)) / (( 0 + 1) * ( 0 - 1) * ( 0 - 2)) + 
+			   table[after]  * ((disp + 1) * (disp + 0) * (disp - 2)) / (( 1 + 1) * ( 1 - 0) * ( 1 - 2)) + 
+			   table[later]  * ((disp + 1) * (disp + 0) * (disp - 1)) / (( 2 + 1) * ( 2 - 0) * ( 2 - 1));
+	}
+
 	T lookup(double phase)
 	{
+		phase += 1;
 		phase -= int(phase);
 		int center = (int)(phase * TABSIZE) % TABSIZE;
-		int before = (center - 1) % TABSIZE;
+		int before = (center - 1 + TABSIZE) % TABSIZE;
 		int after = (center + 1) % TABSIZE;
 		int later = (center + 2) % TABSIZE;
 
 		double disp = (phase * TABSIZE - center);
 		disp -= int(disp);
 
-		// cubic interpolation
-		T sample = table[before] * ((disp - 0) * (disp - 1) * (disp - 2)) / ((-1 - 0) * (-1 - 1) * (-1 - 2)) + 
-				   table[center] * ((disp + 1) * (disp - 1) * (disp - 2)) / (( 0 + 1) * ( 0 - 1) * ( 0 - 2)) + 
-				   table[after]  * ((disp + 1) * (disp + 0) * (disp - 2)) / (( 1 + 1) * ( 1 - 0) * ( 1 - 2)) + 
-				   table[later]  * ((disp + 1) * (disp + 0) * (disp - 1)) / (( 2 + 1) * ( 2 - 0) * ( 2 - 1));
-
-		return sample;
+		// interpolation
+		switch (interp)
+		{
+			case Interp::none : return none(center);
+			case Interp::linear : return linear(center, after, disp);
+			case Interp::quadratic : return quadratic(before, center, after, disp);
+			case Interp::cubic : return cubic(before, center, after, later, disp);
+		}
 	}
 
 	T operator()(double phase)
@@ -56,20 +89,24 @@ public:
 		}
 		return sum;
 	}
+
+private:
+	Interp interp;
 };
 
 // container for holding Waves
-template <typename T> class Soundmath
-{
-public:
-	Wave<T> cycle = Wave<T>([] (double phase) -> T { return sin(2 * PI * phase); });
-	Wave<T> saw = Wave<T>([] (double phase) -> T { return 2 * phase - 1; });
-	Wave<T> triangle = Wave<T>([] (double phase) -> T { return abs(fmod(4 * phase + 3, 4.0) - 2) - 1; });
-	Wave<T> square = Wave<T>([] (double phase) -> T { return phase > 0.5 ? 1 : (phase < 0.5 ? -1 : 0); });
-	Wave<T> phasor = Wave<T>([] (double phase) -> T { return phase; });
-};
+// template <typename T> class Soundmath
+// {
+// public:
+// 	Wave<T> cycle = Wave<T>([] (double phase) -> T { return sin(2 * PI * phase); });
+	
+// };
 
-
+Wave<double> saw([] (double phase) -> double { return 2 * phase - 1; });
+Wave<double> triangle([] (double phase) -> double { return abs(fmod(4 * phase + 3, 4.0) - 2) - 1; });
+Wave<double> square([] (double phase) -> double { return phase > 0.5 ? 1 : (phase < 0.5 ? -1 : 0); });
+Wave<double> phasor([] (double phase) -> double { return phase; });
+Wave<double> noise([] (double phase) -> double { return  2 * ((double)rand() / RAND_MAX) - 1; }, Interp::linear);
 Wave<double> cycle([] (double phase) -> double { return sin(2 * PI * phase); });
 
 // An Oscillator has an associated frequency and phase. The frequency is used to update the phase each sample.
@@ -609,6 +646,9 @@ public:
 		back[0] = 0;
 		order = max(forward.size(), back.size());
 
+		forward.resize(order, 0);
+		back.resize(order, 0);
+
 		forget();
 	}
 
@@ -626,6 +666,9 @@ public:
 		reverse(back.begin(), back.end());
 		back[0] = 0;
 
+		forward.resize(order, 0);
+		back.resize(order, 0);
+
 		forget();
 	}
 
@@ -634,6 +677,7 @@ public:
 		output = vector<T>(order, 0);
 		history = vector<T>(order, 0);
 		origin = 0;
+		computed = false;
 	}
 
 	// get coefficients of a polynomial multiplication (z - a1)(z - a2) ... given roots
@@ -688,10 +732,99 @@ public:
 private:
 	int order;
 	int origin;
-	bool computed = false;
+	bool computed;
 
 	vector<T> forward;
 	vector<T> back;
+	vector<T> output;
+	vector<T> history;
+};
+
+template <typename T> class Delay
+{
+public:
+	Delay() { }
+	~Delay() { }
+
+	// a "sparse" filter
+	Delay(const vector<pair<uint, T>>& feedforward, const vector<pair<uint, T>>& feedback)
+	{
+		forward = feedforward;
+		back = feedback;
+
+		order = 0;
+		for (int i = 0; i < forward.size(); i++)
+			if (forward[i].first > order)
+				order = forward[i].first;
+
+		for (int i = 0; i < back.size(); i++)
+		{
+			if (back[i].first > order)
+				order = back[i].first;
+
+			if (back[i].first == 0)
+				back[i].second = 0;
+		}
+
+		forget();
+	}
+
+	void forget()
+	{
+		output = vector<T>(order, 0);
+		history = vector<T>(order, 0);
+		origin = 0;
+		computed = false;
+	}
+
+	void tick()
+	{
+		origin++;
+		origin %= order;
+		computed = false;
+	}
+
+	T operator()(T sample)
+	{
+		if (!computed)
+			history[origin] = sample;
+
+			T out = 0;
+			uint index, delay;
+			T attenuation;
+
+			for (int i = 0; i < forward.size(); i++)
+			{
+				delay = forward[i].first;
+				attenuation = forward[i].second;
+				index = (origin - delay + order) % order;
+				out += attenuation * history[index];
+			}
+
+			for (int i = 0; i < back.size(); i++)
+			{
+				delay = back[i].first;
+				attenuation = back[i].second;
+				index = (origin - delay + order) % order;
+				out -= attenuation * output[index];
+			}
+
+			output[origin] = out;
+			computed = true;
+
+		return output[origin];
+	}
+
+
+
+
+private:
+	int order;
+	int origin;
+	bool computed;
+
+	vector<pair<uint, T>> forward;
+	vector<pair<uint, T>> back;
 	vector<T> output;
 	vector<T> history;
 };

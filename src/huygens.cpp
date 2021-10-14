@@ -22,8 +22,12 @@ int process(const float* in, float* out)
 {
 	for (int i = 0; i < bsize; i++)
 	{
-		polytest(in, out, i);
+		// polytest(in, out, i);
 		// phasetest(in, out, i);
+		// fmtest(out, i);
+		// noisetest(in, out, i);
+		mirrortest(in, out, i);
+
 	}
 
 	return 0;
@@ -59,6 +63,19 @@ int main()
 	// bind keyboard interrupt to program exit
 	signal(SIGINT, interrupt);
 
+	// double max = -1;
+	// double min = 1;
+	// for (int i = 0; i < TABSIZE; i++)
+	// {
+	// 	double sample = sm.noise.table[i];
+	// 	if (sample > max)
+	// 		max = sample;
+	// 	if (sample < min)
+	// 		min = sample;
+	// }
+
+	// cout << max << ", " << min << endl;
+	// return 0;
 	// Filter<complex<double>> F(1, {-1, 1i, -1i}, {0.7 + 0.7i, 0.7 - 0.7i});
 	// double sample = 1;
 	// F(sample);
