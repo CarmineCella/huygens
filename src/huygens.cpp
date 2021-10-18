@@ -22,12 +22,14 @@ int process(const float* in, float* out)
 {
 	for (int i = 0; i < bsize; i++)
 	{
-		// polytest(in, out, i);
+		polytest(in, out, i);
 		// phasetest(in, out, i);
 		// fmtest(out, i);
 		// noisetest(in, out, i);
-		mirrortest(in, out, i);
-
+		// mirrortest(in, out, i);
+		// snaptest(in, out, i);
+		// bandpasstest(in, out, i);
+		// restest(in, out, i);
 	}
 
 	return 0;
@@ -63,42 +65,14 @@ int main()
 	// bind keyboard interrupt to program exit
 	signal(SIGINT, interrupt);
 
-	// double max = -1;
-	// double min = 1;
-	// for (int i = 0; i < TABSIZE; i++)
-	// {
-	// 	double sample = sm.noise.table[i];
-	// 	if (sample > max)
-	// 		max = sample;
-	// 	if (sample < min)
-	// 		min = sample;
-	// }
-
-	// cout << max << ", " << min << endl;
-	// return 0;
-	// Filter<complex<double>> F(1, {-1, 1i, -1i}, {0.7 + 0.7i, 0.7 - 0.7i});
-	// double sample = 1;
-	// F(sample);
-	// for (int i = 0; i < 1000; i++)
-	// {
-	// 	cout << F(0) << endl;
-	// 	F.tick();
-	// }
-
-	// vector<complex<double>> coeffs = F.coefficients({-1, 1i, -1i});
-	// for (int i = 0; i < 4; i++)
-	// 	cout << coeffs[i] << endl;
-
-
-	// return 0;
-
 	A.startup(); // startup audio engine
-	MI.startup(); // startup midi engine
-	MI.ignore();
-	MO.startup();
-	MI.getports();
+
+	MO.startup(); // startup midi out
 	MO.getports();
 
+	MI.startup(); // startup midi in
+	MI.ignore();
+	MI.getports();
 	MI.open("IAC Driver Bus 1");
 
 	vector<unsigned char> message;
@@ -125,8 +99,8 @@ int main()
 		Pa_Sleep(1);
 	}
 
-	MI.shutdown(); // shutdown midi engine
-	MO.shutdown();
+	MO.shutdown(); // shutdown midi engine
+	MI.shutdown();
 
 	A.shutdown(); // shutdown audio engine
 

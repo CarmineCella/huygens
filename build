@@ -1,7 +1,7 @@
 rm -rf stuff
 mkdir stuff
 cd stuff
-cmake ..
+cmake ../ >/dev/null
 make
 mv src/huygens ..
 cd ..

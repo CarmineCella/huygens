@@ -94,20 +94,13 @@ private:
 	Interp interp;
 };
 
-// container for holding Waves
-// template <typename T> class Soundmath
-// {
-// public:
-// 	Wave<T> cycle = Wave<T>([] (double phase) -> T { return sin(2 * PI * phase); });
-	
-// };
-
 Wave<double> saw([] (double phase) -> double { return 2 * phase - 1; });
 Wave<double> triangle([] (double phase) -> double { return abs(fmod(4 * phase + 3, 4.0) - 2) - 1; });
 Wave<double> square([] (double phase) -> double { return phase > 0.5 ? 1 : (phase < 0.5 ? -1 : 0); });
 Wave<double> phasor([] (double phase) -> double { return phase; });
 Wave<double> noise([] (double phase) -> double { return  2 * ((double)rand() / RAND_MAX) - 1; }, Interp::linear);
 Wave<double> cycle([] (double phase) -> double { return sin(2 * PI * phase); });
+Wave<double> click([] (double phase) -> double { return (int)(phase == 0); }, Interp::linear);
 
 // An Oscillator has an associated frequency and phase. The frequency is used to update the phase each sample.
 // This update requires a call to tick.
@@ -165,7 +158,6 @@ public:
 		frequency = target_freq = f;
 		phase = target_phase = 0;
 	}
-
 
 private:
 	double frequency;
@@ -490,147 +482,6 @@ public:
 };
 
 
-template <typename T> class Phasepusher
-{
-public:
-	Phasepusher() { }
-	~Phasepusher()
-	{
-		delete [] oscillators;
-		delete [] active;
-		delete [] amplitudes;
-	}
-
-	uint voices; // number of harmonic series
-	uint overtones; // number of overtones per series
-	double decay; // rate of decay of overtones
-	double normalization; // to accommodate different decay rates
-	double harmonicity; // harmonicity
-
-	Wave<T>* waveform;
-	Oscillator<T>* oscillators;
-
-	double* active;
-	double* amplitudes;
-
-	Phasepusher(Wave<T>* waveform, uint voices, uint overtones, double decay, double harmonicity = 1)
-	{
-		this->waveform = waveform;
-		this->voices = voices;
-		this->overtones = overtones;
-		this->decay = decay;
-		this->normalization = decay != 1 ? (1 - pow(decay, overtones)) / (1 - decay) : overtones;
-		this->harmonicity = harmonicity;
-
-		oscillators = new Oscillator<T>[voices * overtones];
-		active = new double[voices];
-		amplitudes = new double[voices];
-
-		for (int i = 0; i < voices; i++)
-		{
-			active[i] = 0;
-			amplitudes[i] = 0;
-		}
-	}
-
-	T operator()()
-	{
-		T sample = 0;
-		for (int i = 0; i < voices; i++)
-			if (amplitudes[i])
-				for (int j = 0; j < overtones; j++)
-					sample += amplitudes[i] * pow(decay, j) * (*waveform)(oscillators[i * overtones + j]()) / (2 * voices * normalization);
-
-		return (T)sample;
-	}
-
-	void physics()
-	{
-		// apply forces from gravity
-		int count = 0;
-		for (int i = 0; i < voices; i++)
-		{
-			if (active[i]) // if one voice is active
-				for (int j = i + 1; j < voices; j++)
-				{
-					if (active[j]) // as is another
-						for (int k = 0; k < overtones; k++)
-							for (int m = 0; m < overtones; m++)
-							{
-								// gravities[count].tick(); // allow their overtones to interact
-								count++;
-							}
-					else
-						count += overtones * overtones;
-				}
-			else
-				count += overtones * overtones * (voices - i - 1);
-		}
-	}
-
-	void tick()
-	{
-		for (int i = 0; i < voices; i++)
-			amplitudes[i] = 0.005 * active[i] + 0.995 * amplitudes[i];
-
-		// update oscillator frequencies; tick oscillators
-		for (int i = 0; i < voices; i++)
-			if (active[i] || amplitudes[i])
-				for (int j = 0; j < overtones; j++)
-				{
-					// oscillators[i * overtones + j].freqmod(mtof(particles[i * overtones + j]()));
-					oscillators[i * overtones + j].tick();
-				}
-	}
-
-	// request new voice at a given frequency; return voice number
-	int request(double fundamental, double amplitude = 0)
-	{
-		int voice = -1;
-		for (int i = 0; i < voices; i++)
-		{
-			if (!active[i])
-			{
-				voice = i;
-				break;
-			}
-		}
-
-		if (voice >= 0)
-		{
-			double frequency = fundamental;
-			double previous;
-			active[voice] = amplitude;
-			for (int j = 0; j < overtones; j++)
-			{
-				previous = frequency;
-				frequency = fundamental * pow(j + 1, harmonicity);
-
-				oscillators[voice * overtones + j].reset(frequency);
-			}
-			// cout << "allocated voice " << voice << endl; 
-		}
-
-		return voice;
-	}
-
-	void release(int voice)
-	{
-		if (voice >= 0)
-		{
-			active[voice] = 0;
-			return;
-		}
-
-		for (int i = 0; i < voices; i++)
-		{
-			active[i] = 0;
-		}
-	}
-
-};
-
-
 template <typename T> class Filter
 {
 public:
@@ -644,12 +495,12 @@ public:
 		forward = feedforward;
 		back = feedback;
 		back[0] = 0;
-		order = max(forward.size(), back.size());
+		order = max(forward.size(), back.size()) - 1;
 
-		forward.resize(order, 0);
-		back.resize(order, 0);
+		forward.resize(order + 1, 0);
+		back.resize(order + 1, 0);
 
-		forget();
+		reset();
 	}
 
 	// initialize a filter with its gain, and the poles and zeros of its transfer function
@@ -659,28 +510,43 @@ public:
 
 		forward = coefficients(zeros);
 		reverse(forward.begin(), forward.end());
-		for (int i = 0; i < order; i ++)
+		for (int i = 0; i < order + 1; i ++)
 			forward[i] *= gain;
 
 		back = coefficients(poles);
 		reverse(back.begin(), back.end());
 		back[0] = 0;
 
-		forward.resize(order, 0);
-		back.resize(order, 0);
-
-		forget();
+		reset();
 	}
 
-	void forget()
+	void initialize(uint order)
 	{
-		output = vector<T>(order, 0);
-		history = vector<T>(order, 0);
+		forward = vector<T>(order + 1, 0);
+		back = vector<T>(order + 1, 0);
+
+		this->order = order;
+
+		reset();
+	}
+
+	// adds some padding to the ring buffer
+	void reset()
+	{
+		buffsize = order + 2;
+		output = vector<T>(buffsize, 0);
+		history = vector<T>(buffsize, 0);
 		origin = 0;
 		computed = false;
 	}
 
-	// get coefficients of a polynomial multiplication (z - a1)(z - a2) ... given roots
+	void forget()
+	{
+		output = vector<T>(buffsize, 0);
+		computed = false;
+	}
+
+	// get coefficients of a monic polynomial given its roots
 	static vector<T> coefficients(const vector<T>& zeros, int start = 0)
 	{
 		int degree = zeros.size() - start;
@@ -706,32 +572,50 @@ public:
 	void tick()
 	{
 		origin++;
-		origin %= order;
+		origin %= buffsize;
 		computed = false;
 	}
 
 	T operator()(T sample)
 	{
 		if (!computed)
+		{
 			history[origin] = sample;
 
 			T out = 0;
 			int index;
-			for (int i = 0; i < order; i++)
+			for (int i = 0; i < order + 1; i++)
 			{
-				index = (origin - i + order) % order;
+				index = (origin - i + buffsize) % buffsize;
 				out += forward[i] * history[index] - back[i] * output[index];
 			}
 
 			output[origin] = out;
 			computed = true;
+		}
 
 		return output[origin];
+	}
+
+	void resonant(T frequency, T Q)
+	{
+		T cosine = cos(2 * PI * frequency / SR);
+
+		complex<T> cosine2(cos(4 * PI * frequency / SR), 0);
+		complex<T> sine2(sin(4 * PI * frequency / SR), 0);
+		
+		complex<T> maximum = 1.0 / (Q - 1) - 1.0 / (Q - cosine2 - 1.0i * sine2);
+		double amplitude = 1 / sqrt(abs(maximum));
+
+		forward = vector<T>({amplitude, 0, -amplitude});
+		back = vector<T>({0, -2 * Q * cosine, Q * Q});
+		order = 2;
 	}
 
 private:
 	int order;
 	int origin;
+	int buffsize;
 	bool computed;
 
 	vector<T> forward;
@@ -766,10 +650,12 @@ public:
 				back[i].second = 0;
 		}
 
-		forget();
+		order++; // make room in the ring buffer
+
+		reset();
 	}
 
-	void forget()
+	void reset()
 	{
 		output = vector<T>(order, 0);
 		history = vector<T>(order, 0);
@@ -787,6 +673,7 @@ public:
 	T operator()(T sample)
 	{
 		if (!computed)
+		{
 			history[origin] = sample;
 
 			T out = 0;
@@ -811,12 +698,10 @@ public:
 
 			output[origin] = out;
 			computed = true;
+		}
 
 		return output[origin];
 	}
-
-
-
 
 private:
 	int order;
@@ -827,4 +712,287 @@ private:
 	vector<pair<uint, T>> back;
 	vector<T> output;
 	vector<T> history;
+};
+
+
+template <typename T> class Polyres
+{
+public:
+	uint voices; // number of harmonic series
+	uint overtones; // number of overtones per series
+	double decay; // rate of decay of overtones
+	double normalization; // to accommodate different decay rates
+	double harmonicity; // harmonicity
+
+	Filter<T>* filters;
+	Particle* particles;
+	Particle* guides;
+	Spring* springs;
+	Gravity* gravities;
+
+	double* active;
+	double* amplitudes;
+	double* pitches;
+	
+	double Q;
+
+	~Polyres()
+	{
+		delete [] filters;
+		delete [] particles;
+		delete [] guides;
+		delete [] springs;
+		delete [] gravities;
+
+		delete [] active;
+		delete [] amplitudes;
+		delete [] pitches;
+	}
+
+	Polyres(uint voices, uint overtones, double decay, double Q = 0.99999, double harmonicity = 1)
+	{
+		this->voices = voices;
+		this->overtones = overtones;
+		this->decay = decay;
+		this->normalization = decay != 1 ? (1 - pow(decay, overtones)) / (1 - decay) : overtones;
+		this->harmonicity = harmonicity;
+		this->Q = Q;
+
+		filters = new Filter<T>[voices * overtones];
+		particles = new Particle[voices * overtones];
+		guides = new Particle[voices];
+		springs = new Spring[voices * overtones];
+		gravities = new Gravity[voices * (voices - 1) * overtones * overtones / 2];
+
+		active = new double[voices];
+		amplitudes = new double[voices];
+		pitches = new double[voices];
+
+		for (int i = 0; i < voices; i++)
+			for (int j = 0; j < overtones; j++)
+			{
+				filters[i * overtones + j].initialize(3);
+			}
+
+		for (int i = 0; i < voices; i++)
+		{
+			active[i] = 0;
+			amplitudes[i] = 0;
+		}
+
+		for (int i = 0; i < voices; i++)
+		{
+			springs[i * overtones].bind(&guides[i], &particles[i * overtones]);
+			springs[i * overtones].strength(2 * FORCE);
+			for (int j = 1; j < overtones; j++)
+			{
+				springs[i * overtones + j].bind(&particles[i * overtones + j - 1], &particles[i * overtones + j]);
+				springs[i * overtones + j].strength(1 * FORCE);
+			}
+
+		}
+
+		int count = 0;
+		for (int i = 0; i < voices; i++)
+			for (int j = i + 1; j < voices; j++)
+				for (int k = 0; k < overtones; k++)
+					for (int m = 0; m < overtones; m++)
+					{
+						gravities[count].bind(&particles[i * overtones + k], &particles[j * overtones + m]);
+						gravities[count].strength(1 * FORCE);
+						count++;
+					}
+	}
+
+	T operator()(T input)
+	{
+		T sample = 0;
+		for (int i = 0; i < voices; i++)
+			if (amplitudes[i])
+				for (int j = 0; j < overtones; j++)
+					sample += amplitudes[i] * pow(decay, j) * filters[i * overtones + j](input) / (2 * voices * normalization);
+
+		return (T)sample;
+	}
+
+	void physics()
+	{
+		// zero the forces on particles
+		for (int i = 0; i < voices; i++)
+			if (active[i])
+			{
+				guides[i].prepare();
+				guides[i].mass = active[i];
+				for (int j = 0; j < overtones; j++)
+				{
+					particles[i * overtones + j].prepare();
+					particles[i * overtones + j].mass = active[i];
+				}
+			}
+
+		// apply spring forces
+		for (int i = 0; i < voices; i++)
+			if (active[i])
+				for (int j = 0; j < overtones; j++)
+					springs[i * overtones + j].tick();
+
+		// apply forces from gravity
+		int count = 0;
+		for (int i = 0; i < voices; i++)
+		{
+			if (active[i]) // if one voice is active
+				for (int j = i + 1; j < voices; j++)
+				{
+					if (active[j]) // as is another
+						for (int k = 0; k < overtones; k++)
+							for (int m = 0; m < overtones; m++)
+							{
+								gravities[count].tick(); // allow their overtones to interact
+								count++;
+							}
+					else
+						count += overtones * overtones;
+				}
+			else
+				count += overtones * overtones * (voices - i - 1);
+		}
+
+		// tick the particles
+		for (int i = 0; i < voices; i++)
+			if (active[i])
+				for (int j = 0; j < overtones; j++)
+					particles[i * overtones + j].tick();
+	}
+
+	void tick()
+	{
+		for (int i = 0; i < voices; i++)
+			amplitudes[i] = 0.005 * active[i] + 0.995 * amplitudes[i];
+
+		// update oscillator frequencies; tick oscillators
+		for (int i = 0; i < voices; i++)
+			if (active[i] || amplitudes[i])
+				for (int j = 0; j < overtones; j++)
+				{
+					filters[i * overtones + j].resonant(mtof(particles[i * overtones + j]()), Q);
+					filters[i * overtones + j].tick();
+				}
+	}
+
+	// request new voice at a given frequency; return voice number
+	int request(double fundamental, double amplitude = 0)
+	{
+		int voice = -1;
+		for (int i = 0; i < voices; i++)
+		{
+			if (!active[i])
+			{
+				voice = i;
+				break;
+			}
+		}
+
+		if (voice >= 0)
+		{
+			double frequency = fundamental;
+			double previous;
+			active[voice] = amplitude;
+			guides[voice].initialize(1, ftom(fundamental));
+			for (int j = 0; j < overtones; j++)
+			{
+				previous = frequency;
+				frequency = fundamental * pow(j + 1, harmonicity);
+
+				particles[voice * overtones + j].initialize(1, ftom(frequency));
+				// filters[voice * overtones + j].forget();
+				// filters[voice * overtones + j].resonant(frequency, Q);
+				springs[voice * overtones + j].target(ftom(frequency) - ftom(previous));
+			}
+		}
+
+		return voice;
+	}
+
+	void release(int voice)
+	{
+		if (voice >= 0)
+		{
+			active[voice] = 0;
+			return;
+		}
+
+		for (int i = 0; i < voices; i++)
+		{
+			active[i] = 0;
+		}
+	}
+
+	void makenote(double pitch, double velocity)
+	{
+		pitches[request(mtof(pitch), dbtoa(-8 * (1 - (double)velocity / 127)))] = pitch;
+	}
+
+	void endnote(double pitch)
+	{
+		for (int j = 0; j < voices; j++)
+			if (pitches[j] == pitch)
+				release(j);
+	}
+};
+
+
+// template <typename T> class Bandpass : public Filter<T>
+// {
+// public:
+// 	Bandpass() { }
+// 	~Bandpass() { }
+
+// 	Bandpass(double frequency, double Q) : Filter({1,0,-1}, {1, -2 * exp(-Q) * cos(2 * PI * frequency / SR), exp(-2 * Q)})
+// 	{
+// 	}
+// };
+
+template <typename T> class Compressor
+{
+public:
+	Compressor() { }
+	~Compressor() { }
+
+	Compressor(T threshold, T ratio, T attack, T release, T knee = 0, bool makeup = false)
+	{
+		this->threshold = threshold;
+		this->correction = atodb(ratio);
+
+		up_stiffness = relaxation(attack);
+		down_stiffness = relaxation(release);
+		amplitude = 0;
+	}
+
+	void tick()
+	{
+		if (amplitude < threshold)
+			gain = 0;
+		else if (amplitude > threshold)
+			gain = correction;
+
+		if (gain > target_gain)
+			gain = target_gain * (1 - down_stiffness) + gain * down_stiffness;
+		else if (gain < target_gain)
+			gain = target_gain * (1 - up_stiffness) + gain * up_stiffness;
+	}
+
+	T operator()(T sample)
+	{
+		amplitude = abs(sample);
+		return dbtoa(gain) * sample;
+	}
+
+private:
+	T gain;
+	T target_gain;
+	T up_stiffness;
+	T down_stiffness;
+	T threshold;
+	T correction;
+	T amplitude;
 };
