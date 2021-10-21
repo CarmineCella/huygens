@@ -1,5 +1,4 @@
 // tests.h
-
 #include "soundmath.h"
 
 Synth<double> osc1 = Synth<double>(&cycle, 330);
@@ -23,62 +22,25 @@ int fmtest(float* out, int i)
 
 //////////////////////////////////////////////////////////
 
-// distortion
+// Delay<double> delay(10, 2 * SR); // 10 delay lines, buffer size 2 seconds
 
-// Delay<double> delay({{0,1}}, {{10000,0.5}, {11000,0.25}, {12000,0.125}, {13000, 0.0625}});
-Delay<double> delay({{0,1}}, {{20000,0.5}, {30000,0.5}});
-// Filter<double> lowpass(1, {-1, -1, -1}, {}); // many roots at nyquist
+// void mirrorinit()
+// {
+// 	delay.coefficients({{0,1}}, {{20000,0.5}, {30000,0.5}});
+// }
 
-int mirrortest(const float* in, float* out, int i)
-{
-	float sample = (float)(delay((in[i])));
-	out[2 * i] = sample;
-	out[2 * i + 1] = sample;
 
-	delay.tick();
-	// lowpass.tick();
+// int mirrortest(const float* in, float* out, int i)
+// {
+// 	float sample = (float)(delay((in[i])));
+// 	out[2 * i] = sample;
+// 	out[2 * i + 1] = sample;
 
-	return 0;
-}
+// 	delay.tick();
+// 	// lowpass.tick();
 
-//////////////////////////////////////////////////////////
-
-double x1 = 330;
-double v1 = 0;
-double x2 = 495;
-double v2 = 0;
-double m = 10;
-
-Synth<double> cycle1 = Synth<double>(&triangle, x1);
-Synth<double> cycle2 = Synth<double>(&cycle, x2);
-
-double force(double f1, double f2)
-{
-	double distance = abs(f1 - f2);
-	double cubed = distance * distance * distance;
-	double epsilon = 0.0001;
-	return 1 / (epsilon + cubed);
-}
-
-int gravitytest(const float* in, float* out, int i)
-{
-	out[2 * i] = 0.5 * (float)(cycle1() + cycle2());
-	out[2 * i + 1] = 0.5 * (float)(cycle1() + cycle2());
-
-	v1 += (x2 - x1) * force(x1, x2) / m;
-	v2 += (x1 - x2) * force(x1, x2) / m;
-
-	x1 += v1;
-	x2 += v2;
-
-	cycle1.freqmod(x1);
-	cycle2.freqmod(x2);
-
-	cycle1.tick();
-	cycle2.tick();
-
-	return 0;
-}
+// 	return 0;
+// }
 
 //////////////////////////////////////////////////////////
 
@@ -107,20 +69,24 @@ int resontest(const float* in, float* out, int i)
 // Polyphon<double> poly = Polyphon<double>(&saw, 16, 9, 0.4);
 // Polyphon<double> poly = Polyphon<double>(&cycle, 16, 11, 0.7);
 // Polyphon<double> poly(&saw, 10, 11, 0.7);
-// Polyphon<double> poly(&saw, 7, 11, 0.7);
-Polyres<double> poly(7, 7, 0.7);
-Synth<double> clicker(&click, 0.5);
+Polyphon<double> poly(&cycle, 7, 11, 0.7);
+// Polyres<double> poly(7, 7, 0.7);
 
+double amplification = 4;
 
 int polytest(const float* in, float* out, int i)
 {
-	// float sample = poly();
-	float sample = poly(10 * 2 * (double)rand() / RAND_MAX - 1);
+	float sample = 2 * poly();
+	// float sample = poly(amplification * 2 * (double)rand() / RAND_MAX - 1);
+	// float sample = poly(amplification * (((1 + lfo()) / 2) * in[i] + (1 - (1 + lfo()) / 2) * 2 * (double)rand() / RAND_MAX - 1) / 2);
+	// float sample = poly(in[i]);
 	out[2 * i] = sample;
 	out[2 * i + 1] = sample;
 
-	if (i %  8 == 0)
+	if (i % 8 == 0)
+	{
 		poly.physics();
+	}
 
 	poly.tick();
 
@@ -245,20 +211,17 @@ void bandpasstest(const float* in, float* out, int i)
 
 //////////////////////////////////////////////////////////
 
+Additive<double> addi(&cycle, 10, 7, 0.7);
 
-Polyres<double> polyr(7, 7, 0.7);
-
-void restest(const float* in, float* out, int i)
+void addtest(const float* in, float* out, int i)
 {
-	double random = 2 * (double)rand() / RAND_MAX - 1;
-	float sample = polyr(random);
-	// float sample = polyr(in[i]);
+	float sample = addi();
 
 	out[2 * i] = sample;
 	out[2 * i + 1] = sample;
 
 	if (i % 8 == 0)
-		polyr.physics();
+		addi.physics();
 
-	polyr.tick();
+	addi.tick();
 }

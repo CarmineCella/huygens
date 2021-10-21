@@ -15,16 +15,20 @@ enum Interp
 template <typename T> class Wave
 {
 public:
-	T table[TABSIZE];
-
 	Wave() { }
+	~Wave() { }
 
-	Wave(function<T(double)> shape, Interp interp = Interp::cubic)
+	Wave(function<T(double)> shape, Interp interp = Interp::cubic, double left = 0, double right = 1, bool periodic = true)
 	{
 		this->interp = interp;
+		this->left = left;
+		this->right = right;
+		this->periodic = periodic;
+
 		for (int i = 0; i < TABSIZE; i++)
 		{
-			table[i] = shape((double)i / TABSIZE);
+			double phase = (double) i / TABSIZE;
+			table[i] = shape((1 - phase) * left + phase * right);
 		}
 	}
 
@@ -53,25 +57,37 @@ public:
 			   table[later]  * ((disp + 1) * (disp + 0) * (disp - 1)) / (( 2 + 1) * ( 2 - 0) * ( 2 - 1));
 	}
 
-	T lookup(double phase)
+	T lookup(double input)
 	{
-		phase += 1;
-		phase -= int(phase);
-		int center = (int)(phase * TABSIZE) % TABSIZE;
-		int before = (center - 1 + TABSIZE) % TABSIZE;
-		int after = (center + 1) % TABSIZE;
-		int later = (center + 2) % TABSIZE;
-
-		double disp = (phase * TABSIZE - center);
-		disp -= int(disp);
-
-		// interpolation
-		switch (interp)
+		double phase = (input - left) / (right - left);
+		
+		// get value at endpoint if input is out of bounds
+		if (!periodic && (phase < 0 || phase >= 1))
 		{
-			case Interp::none : return none(center);
-			case Interp::linear : return linear(center, after, disp);
-			case Interp::quadratic : return quadratic(before, center, after, disp);
-			case Interp::cubic : return cubic(before, center, after, later, disp);
+			int center = (phase < 0) ? 0 : TABSIZE - 1;
+			return none(center);
+		}
+		else
+		{
+			phase += 1;
+			phase -= int(phase);
+
+			int center = (int)(phase * TABSIZE) % TABSIZE;
+			int before = (center - 1 + TABSIZE) % TABSIZE;
+			int after = (center + 1) % TABSIZE;
+			int later = (center + 2) % TABSIZE;
+
+			double disp = (phase * TABSIZE - center);
+			disp -= int(disp);
+
+			// interpolation
+			switch (interp)
+			{
+				case Interp::none : return none(center);
+				case Interp::linear : return linear(center, after, disp);
+				case Interp::quadratic : return quadratic(before, center, after, disp);
+				case Interp::cubic : return cubic(before, center, after, later, disp);
+			}
 		}
 	}
 
@@ -90,9 +106,16 @@ public:
 		return sum;
 	}
 
+protected:
+	T table[TABSIZE];
+
 private:
 	Interp interp;
+	double left; // endpoints of range
+	double right;
+	bool periodic;
 };
+
 
 Wave<double> saw([] (double phase) -> double { return 2 * phase - 1; });
 Wave<double> triangle([] (double phase) -> double { return abs(fmod(4 * phase + 3, 4.0) - 2) - 1; });
@@ -101,6 +124,7 @@ Wave<double> phasor([] (double phase) -> double { return phase; });
 Wave<double> noise([] (double phase) -> double { return  2 * ((double)rand() / RAND_MAX) - 1; }, Interp::linear);
 Wave<double> cycle([] (double phase) -> double { return sin(2 * PI * phase); });
 Wave<double> click([] (double phase) -> double { return (int)(phase == 0); }, Interp::linear);
+
 
 // An Oscillator has an associated frequency and phase. The frequency is used to update the phase each sample.
 // This update requires a call to tick.
@@ -135,9 +159,6 @@ public:
 		target_phase -= int(target_phase);
 	}
 
-	double lookup()
-	{ return phase; }
-
 	T operator()()
 	{ return phase; }
 
@@ -158,6 +179,10 @@ public:
 		frequency = target_freq = f;
 		phase = target_phase = 0;
 	}
+
+protected:
+	T lookup()
+	{ return phase; }
 
 private:
 	double frequency;
@@ -455,9 +480,9 @@ public:
 		}
 	}
 
-	void makenote(double pitch, double velocity)
+	void makenote(double pitch, double amplitude)
 	{
-		pitches[request(mtof(pitch), dbtoa(-8 * (1 - (double)velocity / 127)))] = pitch;
+		pitches[request(mtof(pitch), amplitude)] = pitch;
 	}
 
 	void endnote(double pitch)
@@ -620,96 +645,6 @@ private:
 
 	vector<T> forward;
 	vector<T> back;
-	vector<T> output;
-	vector<T> history;
-};
-
-template <typename T> class Delay
-{
-public:
-	Delay() { }
-	~Delay() { }
-
-	// a "sparse" filter
-	Delay(const vector<pair<uint, T>>& feedforward, const vector<pair<uint, T>>& feedback)
-	{
-		forward = feedforward;
-		back = feedback;
-
-		order = 0;
-		for (int i = 0; i < forward.size(); i++)
-			if (forward[i].first > order)
-				order = forward[i].first;
-
-		for (int i = 0; i < back.size(); i++)
-		{
-			if (back[i].first > order)
-				order = back[i].first;
-
-			if (back[i].first == 0)
-				back[i].second = 0;
-		}
-
-		order++; // make room in the ring buffer
-
-		reset();
-	}
-
-	void reset()
-	{
-		output = vector<T>(order, 0);
-		history = vector<T>(order, 0);
-		origin = 0;
-		computed = false;
-	}
-
-	void tick()
-	{
-		origin++;
-		origin %= order;
-		computed = false;
-	}
-
-	T operator()(T sample)
-	{
-		if (!computed)
-		{
-			history[origin] = sample;
-
-			T out = 0;
-			uint index, delay;
-			T attenuation;
-
-			for (int i = 0; i < forward.size(); i++)
-			{
-				delay = forward[i].first;
-				attenuation = forward[i].second;
-				index = (origin - delay + order) % order;
-				out += attenuation * history[index];
-			}
-
-			for (int i = 0; i < back.size(); i++)
-			{
-				delay = back[i].first;
-				attenuation = back[i].second;
-				index = (origin - delay + order) % order;
-				out -= attenuation * output[index];
-			}
-
-			output[origin] = out;
-			computed = true;
-		}
-
-		return output[origin];
-	}
-
-private:
-	int order;
-	int origin;
-	bool computed;
-
-	vector<pair<uint, T>> forward;
-	vector<pair<uint, T>> back;
 	vector<T> output;
 	vector<T> history;
 };
@@ -927,9 +862,9 @@ public:
 		}
 	}
 
-	void makenote(double pitch, double velocity)
+	void makenote(double pitch, double amplitude)
 	{
-		pitches[request(mtof(pitch), dbtoa(-8 * (1 - (double)velocity / 127)))] = pitch;
+		pitches[request(mtof(pitch), amplitude)] = pitch;
 	}
 
 	void endnote(double pitch)
@@ -940,17 +875,276 @@ public:
 	}
 };
 
+// circular buffer object
+template <typename T> class Buffer
+{
+public:
+	~Buffer()
+	{
+		delete [] data;
+	}
 
-// template <typename T> class Bandpass : public Filter<T>
-// {
-// public:
-// 	Bandpass() { }
-// 	~Bandpass() { }
+	Buffer(uint size = 0)
+	{
+		size += (size == 0) ? 1 : 0; // disallow size zero
+		this->size = size;
+		origin = 0;
+		// data = vector<T>(size, 0);
+		data = new T[size];
+		memset(data, 0, size);
+	}
 
-// 	Bandpass(double frequency, double Q) : Filter({1,0,-1}, {1, -2 * exp(-Q) * cos(2 * PI * frequency / SR), exp(-2 * Q)})
-// 	{
-// 	}
-// };
+	void tick()
+	{
+		origin++;
+		origin %= size;
+	}
+
+	// lookup at some past position
+	T operator()(uint position = 0)
+	{
+		return data[(origin - position + size) % size];
+	}
+
+	void write(T value)
+	{
+		data[origin] = value;
+	}
+
+	void accum(T value)
+	{
+		data[origin] += value;
+	}
+
+
+private:
+	// vector<T> data;
+	T* data;
+	uint size;
+	uint origin;
+};
+
+
+// many filters in parallel
+template <typename T> class Filterbank
+{
+public:
+	Filterbank() { }
+	~Filterbank()
+	{
+		delete [] forwards;
+		delete [] backs;
+	}
+
+	// initialize N filters of a given order, reading and working with circular buffers
+	Filterbank(uint order, uint N = 1) : input(order + 2)
+	{
+		outputs.reserve(N);
+		for (int i = 0; i < N; i++)
+			outputs.push_back(Buffer<T>(order + 2));
+
+		forwards = new T[(order + 1) * N];
+		backs = new T[(order + 1) * N];
+
+		for (int i = 0; i < order + 1; i++)
+			for (int j = 0; j < N; j++)
+			{
+				forwards[i * N + j] = 0; // jth filter, ith coefficient
+				backs[i * N + j] = 0;
+			}
+
+		this->order = order;
+		this->N = N;
+		computed = false;
+	}
+
+	// initalize the nth filter's coefficients
+	void coefficients(const vector<T>& forward, const vector<T>& back, uint n = 0)
+	{
+		// assert(order * N + n);
+
+		for (int i = 0; i < order + 1; i++)
+		{
+			forwards[i * N + n] = forward[i];
+			backs[i * N + n] = back[i];
+		}
+		backs[n] = 0;
+	}
+
+	// get the result of filter applied to a sample
+	T operator()(T sample)
+	{
+		if (!computed)
+		{
+			T out = 0;
+			input.write(sample);
+
+			for (int j = 0; j < N; j++)     		// j is filter number
+			{
+				outputs[j].write(0);
+				for (int i = 0; i < order + 1; i++) // i is delay time
+					outputs[j].accum(forwards[i * N + j] * input(i) - backs[i * N + j] * outputs[j](i));
+				out += outputs[j]();
+			}
+
+			computed = true;
+			return out;
+		}
+
+		T out = 0;
+		for (int j = 0; j < N; j++)
+			out += outputs[j]();
+
+		return out;
+	}
+
+	// timestep
+	void tick()
+	{
+		input.tick();
+		for (int j = 0; j < N; j++)
+			outputs[j].tick();
+		computed = false;
+	}
+
+private:
+	Buffer<T> input; // circular buffers of inputs and outputs
+	vector<Buffer<T>> outputs; 
+	uint N; // number of filters
+	uint order;
+
+	T* forwards; // feedforward coefficient lists
+	T* backs; // feedback coefficient lists
+
+	bool computed; // flag in case of repeated calls to operator()
+};
+
+
+// many delays
+template <typename T> class Delay
+{
+public:
+	Delay() { }
+	~Delay()
+	{
+		delete [] forwards;
+		delete [] backs;
+	}
+
+	// initialize N delays of given sparsity and maximum time
+	Delay(uint sparsity, uint time) : input(time), output(time)
+	{
+		forwards = new pair<uint, T>[sparsity]; 
+		backs = new pair<uint, T>[sparsity];
+
+		for (int i = 0; i < sparsity; i++)
+		{
+			forwards[i] = {0, 0};
+			backs[i] = {0, 0};
+		}
+
+		this->sparsity = sparsity;
+		computed = false;
+	}
+
+	// initalize coefficients
+	void coefficients(const vector<pair<uint, T>>& forward, const vector<pair<uint, T>>& back)
+	{
+		uint order = min(sparsity, (uint)forward.size());
+		for (int i = 0; i < order; i++)
+			forwards[i] = forward[i];
+		for (int i = order; i < sparsity; i++)
+			forwards[i] = {0, 0}; // zero out trailing coefficients
+
+		order = min(sparsity, (uint)back.size());
+		for (int i = 0; i < min(sparsity, (uint)back.size()); i++)
+		{
+			if (back[i].first != 0) // don't allow zero-time feedback
+				backs[i] = back[i];
+			else
+				backs[i] = {0, 0};
+		}
+		for (int i = order; i < sparsity; i++)
+			backs[i] = {0, 0}; // zero out trailing coefficients
+	}
+
+	// modulate the feedforward coeffs of nth delay
+	void modulate_forward(uint n, const pair<uint, T>& forward)
+	{ forwards[n] = forward; }
+
+	// modulate the feedback coeffs of nth delay
+	void modulate_back(uint n, const pair<uint, T>& back)
+	{
+		if (back.first == 0)
+			backs[n] = {0, 0};
+		else
+			backs[n] = back;
+	}
+
+	// get the result of filter applied to a sample
+	T operator()(T sample)
+	{
+		if (!computed)
+		{
+			input.write(sample);
+			output.write(0);
+
+			for (int i = 0; i < sparsity; i++) // i is delay time
+			{
+				pair<uint, T> forward = forwards[i];
+				pair<uint, T> back = backs[i];
+				output.accum(forward.second * input(forward.first) - back.second * output(back.first));
+			}
+
+			computed = true;
+		}
+
+		return output(0);
+	}
+
+	// timestep
+	void tick()
+	{
+		input.tick();
+		output.tick();
+		computed = false;
+	}
+
+private:
+	Buffer<T> input; // circular buffers of inputs and outputs
+	Buffer<T> output; 
+	uint sparsity;
+
+	pair<uint, T>* forwards; // feedforward times and coefficients
+	pair<uint, T>* backs; // feedback times and coefficients
+
+	bool computed; // flag in case of repeated calls to operator()
+};
+
+
+template <typename T> class FilterType
+{
+public:
+	FilterType() { }
+	~FilterType() { }
+
+	static pair<vector<T>, vector<T>> resonant(T gain, T frequency, T modulus)
+	{
+		T cosine = cos(2 * PI * frequency / SR);
+
+		complex<T> cosine2(cos(4 * PI * frequency / SR), 0);
+		complex<T> sine2(sin(4 * PI * frequency / SR), 0);
+		
+		complex<T> maximum = 1.0 / (modulus - 1) - 1.0 / (modulus - cosine2 - 1.0i * sine2);
+		T amplitude = gain / sqrt(abs(maximum));
+
+		vector<T> forward({amplitude, 0, -amplitude});
+		vector<T> back({0, -2 * modulus * cosine, modulus * modulus});
+
+		return {forward, back};
+	}
+};
+
 
 template <typename T> class Compressor
 {
@@ -995,4 +1189,375 @@ private:
 	T threshold;
 	T correction;
 	T amplitude;
+};
+
+
+// an n-shot Synth<T>
+template <typename T> class Envelope
+{
+public:
+	Envelope() { }
+	~Envelope() { }
+
+	Envelope(const vector<function<T(double)>>& functions, Interp interp = Interp::cubic)
+	{
+		stages = functions.size();
+		shapes.reserve(stages);
+		for (int i = 0; i < stages; i++)
+			shapes.push_back(Wave<T>(functions[i], interp, 0, 1, false));
+
+		stage = 0;
+		active = false;
+	}
+
+	void trigger(T time, int stage = -1)
+	{
+		active = true;
+		if (stage >= 0)
+			this->stage = (uint)stage;
+		else
+			this->stage++;
+
+		this->stage %= stages;
+		phase = 0;
+		this->rate = time / SR;
+	}
+
+	void tick()
+	{
+		if (active)
+		{
+			phase += rate;
+			if (phase > 1)
+			{
+				phase = 1;
+				active = false;
+			}
+		}
+	}
+
+	T operator()()
+	{
+		return shapes[stage](phase);
+	}
+
+private:
+	vector<Wave<T>> shapes;
+	uint stages;
+	uint stage;
+	T rate;
+	T phase;
+
+	bool active;
+};
+
+Envelope<double> hann({[] (double phase) -> double { return 0.5 * (1 - cos(2 * PI * phase)); }});
+
+
+template <typename T> class Granulator
+{
+public:
+	Granulator() { }
+	~Granulator() { }
+
+	Granulator(Envelope<T>* window)
+	{
+
+	}
+};
+
+
+
+// receives requests for particle systems; runs physics on them
+template <typename T> class Minimizer
+{
+public:
+	Minimizer() { }
+	~Minimizer()
+	{
+		delete [] springs;
+		delete [] gravities;
+		delete [] guides;
+		delete [] particles;		
+		delete [] active;
+		delete [] pitches;
+	}
+
+	Minimizer(uint voices, uint overtones, T decay, T harmonicity) : 
+		voices(voices), overtones(overtones), decay(decay), harmonicity(harmonicity)
+	{
+		particles = new Particle[voices * overtones];
+		guides = new Particle[voices];
+		springs = new Spring[voices * overtones];
+		gravities = new Gravity[voices * (voices - 1) * overtones * overtones / 2];
+
+		active = new T[voices];
+		pitches = new T[voices];
+
+		for (int i = 0; i < voices; i++)
+			active[i] = 0;
+
+		for (int i = 0; i < voices; i++)
+		{
+			springs[i * overtones].bind(&guides[i], &particles[i * overtones]);
+			springs[i * overtones].strength(2 * FORCE);
+			for (int j = 1; j < overtones; j++)
+			{
+				springs[i * overtones + j].bind(&particles[i * overtones + j - 1], &particles[i * overtones + j]);
+				springs[i * overtones + j].strength(1 * FORCE);
+			}
+		}
+
+		int count = 0;
+		for (int i = 0; i < voices; i++)
+			for (int j = i + 1; j < voices; j++)
+				for (int k = 0; k < overtones; k++)
+					for (int m = 0; m < overtones; m++)
+					{
+						gravities[count].bind(&particles[i * overtones + k], &particles[j * overtones + m]);
+						gravities[count].strength(1 * FORCE);
+						count++;
+					}
+	}
+
+	void physics()
+	{
+		// zero the forces on particles
+		for (int i = 0; i < voices; i++)
+			if (active[i])
+			{
+				guides[i].prepare();
+				guides[i].mass = active[i];
+				for (int j = 0; j < overtones; j++)
+				{
+					particles[i * overtones + j].prepare();
+					particles[i * overtones + j].mass = active[i];
+				}
+			}
+
+		// apply spring forces
+		for (int i = 0; i < voices; i++)
+			if (active[i])
+				for (int j = 0; j < overtones; j++)
+					springs[i * overtones + j].tick();
+
+		// apply forces from gravity
+		int count = 0;
+		for (int i = 0; i < voices; i++)
+		{
+			if (active[i]) // if one voice is active
+				for (int j = i + 1; j < voices; j++)
+				{
+					if (active[j]) // as is another
+						for (int k = 0; k < overtones; k++)
+							for (int m = 0; m < overtones; m++)
+							{
+								gravities[count].tick(); // allow their overtones to interact
+								count++;
+							}
+					else
+						count += overtones * overtones;
+				}
+			else
+				count += overtones * overtones * (voices - i - 1);
+		}
+
+		// tick the particles
+		for (int i = 0; i < voices; i++)
+			if (active[i])
+				for (int j = 0; j < overtones; j++)
+					particles[i * overtones + j].tick();
+	}
+
+	// request a new note, return allocated voice number
+	int request(T fundamental, T amplitude = 0)
+	{
+		int voice = -1;
+		for (int i = 0; i < voices; i++)
+		{
+			if (!active[i])
+			{
+				voice = i;
+				break;
+			}
+		}
+
+		if (voice >= 0)
+		{
+			T frequency = fundamental;
+			T previous;
+			active[voice] = amplitude;
+			guides[voice].initialize(1, ftom(fundamental)); // mass depends on decay / amplitude?
+			for (int j = 0; j < overtones; j++)
+			{
+				previous = frequency;
+				frequency = fundamental * pow(j + 1, harmonicity);
+
+				particles[voice * overtones + j].initialize(1, ftom(frequency));
+				springs[voice * overtones + j].target(ftom(frequency) - ftom(previous));
+			}
+		}
+
+		return voice;
+	}
+
+	// release a given voice, or all voices
+	void release(int voice)
+	{
+		if (voice >= 0)
+		{
+			active[voice] = 0;
+			return;
+		}
+
+		for (int i = 0; i < voices; i++)
+		{
+			active[i] = 0;
+		}
+	}
+
+	void makenote(T pitch, T amplitude)
+	{
+		int voice = request(mtof(pitch), amplitude);
+		if (voice >= 0)
+			pitches[voice] = pitch;
+	}
+
+	void endnote(T pitch)
+	{
+		for (int j = 0; j < voices; j++)
+			if (pitches[j] == pitch)
+				release(j);
+	}
+
+protected:
+	uint voices;
+	uint overtones;
+	T decay;
+	T harmonicity;
+
+	Particle* particles; // allows subclasses to access particle positions
+	T* active; // and turn voices on / off
+	T* pitches;
+
+private:
+	Particle* guides;
+	Spring* springs;
+	Gravity* gravities;
+};
+
+
+template <typename T> class Additive : public Minimizer<T>
+{
+public:
+	using Minimizer<T>::voices, Minimizer<T>::overtones, Minimizer<T>::decay, Minimizer<T>::harmonicity, 
+		  Minimizer<T>::particles, Minimizer<T>::active, Minimizer<T>::pitches;
+	
+	Additive() { }
+	~Additive()
+	{
+		delete [] oscillators;
+		delete [] amplitudes;
+	}
+
+	Additive(Wave<T>* waveform, uint voices, uint overtones, T decay, T harmonicity = 1.0, T k = 0.1) : 
+		Minimizer<T>(voices, overtones, decay, harmonicity), waveform(waveform), attack(relaxation(k))
+	{
+		normalization = decay != 1 ? (1 - pow(decay, overtones)) / (1 - decay) : overtones;
+		
+		oscillators = new Oscillator<T>[voices * overtones];
+		amplitudes = new T[voices];
+
+		for (int i = 0; i < voices; i++)
+			amplitudes[i] = 0;
+
+		for (int i = 0; i < voices * overtones; i++)
+			oscillators[i] = Oscillator<T>();
+	}
+
+	void tick()
+	{
+		for (int i = 0; i < voices; i++)
+			amplitudes[i] = (1 - attack) * active[i] + attack * amplitudes[i];
+
+		// update oscillator frequencies; tick oscillators
+		for (int i = 0; i < voices; i++)
+			if (active[i] || amplitudes[i])
+				for (int j = 0; j < overtones; j++)
+				{
+					oscillators[i * overtones + j].freqmod(mtof(particles[i * overtones + j]()));
+					oscillators[i * overtones + j].tick();
+				}
+	}
+
+	T operator()()
+	{
+		T sample = 0;
+		for (int i = 0; i < voices; i++)
+			if (amplitudes[i])
+				for (int j = 0; j < overtones; j++)
+					sample += amplitudes[i] * pow(decay, j) * (*waveform)(oscillators[i * overtones + j]()) / (voices * normalization);
+
+		return (T)sample;		
+	}
+
+private:
+	Wave<T>* waveform;
+	Oscillator<T>* oscillators;
+	T* amplitudes;
+	T attack;
+	T normalization;
+};
+
+template <typename T> class Subtractive : public Minimizer<T>
+{
+public:
+	using Minimizer<T>::voices, Minimizer<T>::overtones, Minimizer<T>::decay, Minimizer<T>::harmonicity,
+		  Minimizer<T>::particles, Minimizer<T>::active, Minimizer<T>::pitches;
+
+	Subtractive() { }
+	~Subtractive()
+	{
+		delete [] amplitudes;
+	}
+
+	Subtractive(uint voices, uint overtones, T decay, T harmonicity = 1.0, T k = 0.1) : 
+		Minimizer<T>(voices, overtones, decay, harmonicity), attack(relaxation(k))
+	{
+		normalization = decay != 1 ? (1 - pow(decay, overtones)) / (1 - decay) : overtones;
+		amplitudes = new T[voices];
+
+		for (int i = 0; i < voices; i++)
+			amplitudes[i] = 0;
+
+		filters = Filterbank<T>(2, voices * overtones);
+	}
+
+	void tick()
+	{
+		for (int i = 0; i < voices; i++)
+			amplitudes[i] = (1 - attack) * active[i] + attack * amplitudes[i];
+
+		// update and tick filters
+		for (int i = 0; i < voices; i++)
+			for (int j = 0; j < overtones; j++)
+			{
+				T frequency = mtof(particles[i * overtones + j]());
+				pair<vector<T>, vector<T>> params = FilterType<T>::resonant(pow(decay, j) * amplitudes[i] / (voices * normalization), frequency, 0.99999);
+				filters.coefficients(params.first, params.second, i * overtones + j);
+			}
+
+		filters.tick();
+	}
+
+	T operator()(T sample)
+	{
+		return filters(sample);
+	}
+
+private:
+	Filterbank<T> filters;
+	T* amplitudes;
+	T normalization;
+	T attack;
 };

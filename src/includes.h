@@ -57,5 +57,4 @@ double dbtoa(double db)
 }
 
 #endif
-
 #define INCLUDED

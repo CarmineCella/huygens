@@ -30,6 +30,9 @@ int process(const float* in, float* out)
 		// snaptest(in, out, i);
 		// bandpasstest(in, out, i);
 		// restest(in, out, i);
+		// subtest(in, out, i);
+		// addtest(in, out, i);
+		// fbanktest(in, out, i);
 	}
 
 	return 0;
@@ -65,6 +68,19 @@ int main()
 	// bind keyboard interrupt to program exit
 	signal(SIGINT, interrupt);
 
+	// for (int j = 0; j < 2; j++)
+	// {
+	// 	double frequency = 400 * (j + 1);
+	// 	pair<vector<double>, vector<double>> params = FilterType<double>::resonant(0.01, frequency, 0.9999);
+	// 	fbank.coefficients(params.first, params.second, j);
+	// 	for (int i = 0; i < 3; i++)
+	// 		cout << params.first[i] << ", ";
+	// 	cout << endl;
+	// 	for (int i = 0; i < 3; i++)
+	// 		cout << params.second[i] << ", ";
+	// 	cout << endl << endl;
+	// }
+
 	A.startup(); // startup audio engine
 
 	MO.startup(); // startup midi out
@@ -91,7 +107,7 @@ int main()
 			int pitch = (int)message[1];
 			int velocity = (int)message[2];
 			if (velocity)
-				poly.makenote(pitch, velocity);
+				poly.makenote(pitch, dbtoa(-8 * (1 - (double)velocity / 127)));
 			else
 				poly.endnote(pitch);
 		}
